@@ -4,7 +4,7 @@
 
 #include <rte_alarm.h>
 #include <rte_bus_pci.h>
-#include <rte_ethdev_pci.h>
+#include <ethdev_pci.h>
 #include <rte_pci.h>
 
 #include "hns3_ethdev.h"
@@ -123,6 +123,47 @@ hns3_pf_enable_irq0(struct hns3_hw *hw)
 }
 
 static enum hns3_evt_cause
+hns3_proc_imp_reset_event(struct hns3_adapter *hns, bool is_delay,
+			  uint32_t *vec_val)
+{
+	struct hns3_hw *hw = &hns->hw;
+
+	rte_atomic16_set(&hw->reset.disable_cmd, 1);
+	hns3_atomic_set_bit(HNS3_IMP_RESET, &hw->reset.pending);
+	*vec_val = BIT(HNS3_VECTOR0_IMPRESET_INT_B);
+	if (!is_delay) {
+		hw->reset.stats.imp_cnt++;
+		hns3_warn(hw, "IMP reset detected, clear reset status");
+	} else {
+		hns3_schedule_delayed_reset(hns);
+		hns3_warn(hw, "IMP reset detected, don't clear reset status");
+	}
+
+	return HNS3_VECTOR0_EVENT_RST;
+}
+
+static enum hns3_evt_cause
+hns3_proc_global_reset_event(struct hns3_adapter *hns, bool is_delay,
+			     uint32_t *vec_val)
+{
+	struct hns3_hw *hw = &hns->hw;
+
+	rte_atomic16_set(&hw->reset.disable_cmd, 1);
+	hns3_atomic_set_bit(HNS3_GLOBAL_RESET, &hw->reset.pending);
+	*vec_val = BIT(HNS3_VECTOR0_GLOBALRESET_INT_B);
+	if (!is_delay) {
+		hw->reset.stats.global_cnt++;
+		hns3_warn(hw, "Global reset detected, clear reset status");
+	} else {
+		hns3_schedule_delayed_reset(hns);
+		hns3_warn(hw,
+			  "Global reset detected, don't clear reset status");
+	}
+
+	return HNS3_VECTOR0_EVENT_RST;
+}
+
+static enum hns3_evt_cause
 hns3_check_event_cause(struct hns3_adapter *hns, uint32_t *clearval)
 {
 	struct hns3_hw *hw = &hns->hw;
@@ -131,12 +172,14 @@ hns3_check_event_cause(struct hns3_adapter *hns, uint32_t *clearval)
 	uint32_t hw_err_src_reg;
 	uint32_t val;
 	enum hns3_evt_cause ret;
+	bool is_delay;
 
 	/* fetch the events from their corresponding regs */
 	vector0_int_stats = hns3_read_dev(hw, HNS3_VECTOR0_OTHER_INT_STS_REG);
 	cmdq_src_val = hns3_read_dev(hw, HNS3_VECTOR0_CMDQ_SRC_REG);
 	hw_err_src_reg = hns3_read_dev(hw, HNS3_RAS_PF_OTHER_INT_STS_REG);
 
+	is_delay = clearval == NULL ? true : false;
 	/*
 	 * Assumption: If by any chance reset and mailbox events are reported
 	 * together then we will only process reset event and defer the
@@ -145,35 +188,13 @@ hns3_check_event_cause(struct hns3_adapter *hns, uint32_t *clearval)
 	 * from H/W just for the mailbox.
 	 */
 	if (BIT(HNS3_VECTOR0_IMPRESET_INT_B) & vector0_int_stats) { /* IMP */
-		rte_atomic16_set(&hw->reset.disable_cmd, 1);
-		hns3_atomic_set_bit(HNS3_IMP_RESET, &hw->reset.pending);
-		val = BIT(HNS3_VECTOR0_IMPRESET_INT_B);
-		if (clearval) {
-			hw->reset.stats.imp_cnt++;
-			hns3_warn(hw, "IMP reset detected, clear reset status");
-		} else {
-			hns3_schedule_delayed_reset(hns);
-			hns3_warn(hw, "IMP reset detected, don't clear reset status");
-		}
-
-		ret = HNS3_VECTOR0_EVENT_RST;
+		ret = hns3_proc_imp_reset_event(hns, is_delay, &val);
 		goto out;
 	}
 
 	/* Global reset */
 	if (BIT(HNS3_VECTOR0_GLOBALRESET_INT_B) & vector0_int_stats) {
-		rte_atomic16_set(&hw->reset.disable_cmd, 1);
-		hns3_atomic_set_bit(HNS3_GLOBAL_RESET, &hw->reset.pending);
-		val = BIT(HNS3_VECTOR0_GLOBALRESET_INT_B);
-		if (clearval) {
-			hw->reset.stats.global_cnt++;
-			hns3_warn(hw, "Global reset detected, clear reset status");
-		} else {
-			hns3_schedule_delayed_reset(hns);
-			hns3_warn(hw, "Global reset detected, don't clear reset status");
-		}
-
-		ret = HNS3_VECTOR0_EVENT_RST;
+		ret = hns3_proc_global_reset_event(hns, is_delay, &val);
 		goto out;
 	}
 
@@ -2211,7 +2232,7 @@ hns3_check_dcb_cfg(struct rte_eth_dev *dev)
 }
 
 static int
-hns3_bind_ring_with_vector(struct hns3_hw *hw, uint8_t vector_id, bool mmap,
+hns3_bind_ring_with_vector(struct hns3_hw *hw, uint16_t vector_id, bool en,
 			   enum hns3_ring_type queue_type, uint16_t queue_id)
 {
 	struct hns3_cmd_desc desc;
@@ -2220,13 +2241,15 @@ hns3_bind_ring_with_vector(struct hns3_hw *hw, uint8_t vector_id, bool mmap,
 	enum hns3_cmd_status status;
 	enum hns3_opcode_type op;
 	uint16_t tqp_type_and_id = 0;
-	const char *op_str;
 	uint16_t type;
 	uint16_t gl;
 
-	op = mmap ? HNS3_OPC_ADD_RING_TO_VECTOR : HNS3_OPC_DEL_RING_TO_VECTOR;
+	op = en ? HNS3_OPC_ADD_RING_TO_VECTOR : HNS3_OPC_DEL_RING_TO_VECTOR;
 	hns3_cmd_setup_basic_desc(&desc, op, false);
-	req->int_vector_id = vector_id;
+	req->int_vector_id = hns3_get_field(vector_id, HNS3_TQP_INT_ID_L_M,
+					      HNS3_TQP_INT_ID_L_S);
+	req->int_vector_id_h = hns3_get_field(vector_id, HNS3_TQP_INT_ID_H_M,
+					      HNS3_TQP_INT_ID_H_S);
 
 	if (queue_type == HNS3_RING_TYPE_RX)
 		gl = HNS3_RING_GL_RX;
@@ -2242,11 +2265,10 @@ hns3_bind_ring_with_vector(struct hns3_hw *hw, uint8_t vector_id, bool mmap,
 		       gl);
 	req->tqp_type_and_id[0] = rte_cpu_to_le_16(tqp_type_and_id);
 	req->int_cause_num = 1;
-	op_str = mmap ? "Map" : "Unmap";
 	status = hns3_cmd_send(hw, &desc, 1);
 	if (status) {
 		hns3_err(hw, "%s TQP %u fail, vector_id is %u, status is %d.",
-			 op_str, queue_id, req->int_vector_id, status);
+			 en ? "Map" : "Unmap", queue_id, vector_id, status);
 		return status;
 	}
 
@@ -4663,7 +4685,7 @@ hns3_init_pf(struct rte_eth_dev *eth_dev)
 		goto err_fdir;
 	}
 
-	hns3_set_default_rss_args(hw);
+	hns3_rss_set_default_args(hw);
 
 	ret = hns3_enable_hw_error_intr(hns, true);
 	if (ret) {
@@ -4776,33 +4798,34 @@ hns3_map_rx_interrupt(struct rte_eth_dev *dev)
 	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(dev);
 	struct rte_intr_handle *intr_handle = &pci_dev->intr_handle;
 	struct hns3_hw *hw = HNS3_DEV_PRIVATE_TO_HW(dev->data->dev_private);
-	uint8_t base = RTE_INTR_VEC_ZERO_OFFSET;
-	uint8_t vec = RTE_INTR_VEC_ZERO_OFFSET;
+	uint16_t base = RTE_INTR_VEC_ZERO_OFFSET;
+	uint16_t vec = RTE_INTR_VEC_ZERO_OFFSET;
 	uint32_t intr_vector;
 	uint16_t q_id;
 	int ret;
 
-	if (dev->data->dev_conf.intr_conf.rxq == 0)
+	/*
+	 * hns3 needs a separate interrupt to be used as event interrupt which
+	 * could not be shared with task queue pair, so KERNEL drivers need
+	 * support multiple interrupt vectors.
+	 */
+	if (dev->data->dev_conf.intr_conf.rxq == 0 ||
+	    !rte_intr_cap_multiple(intr_handle))
 		return 0;
 
-	/* disable uio/vfio intr/eventfd mapping */
 	rte_intr_disable(intr_handle);
+	intr_vector = hw->used_rx_queues;
+	/* creates event fd for each intr vector when MSIX is used */
+	if (rte_intr_efd_enable(intr_handle, intr_vector))
+		return -EINVAL;
 
-	/* check and configure queue intr-vector mapping */
-	if (rte_intr_cap_multiple(intr_handle) ||
-	    !RTE_ETH_DEV_SRIOV(dev).active) {
-		intr_vector = hw->used_rx_queues;
-		/* creates event fd for each intr vector when MSIX is used */
-		if (rte_intr_efd_enable(intr_handle, intr_vector))
-			return -EINVAL;
-	}
-	if (rte_intr_dp_is_en(intr_handle) && !intr_handle->intr_vec) {
+	if (intr_handle->intr_vec == NULL) {
 		intr_handle->intr_vec =
 			rte_zmalloc("intr_vec",
 				    hw->used_rx_queues * sizeof(int), 0);
 		if (intr_handle->intr_vec == NULL) {
-			hns3_err(hw, "Failed to allocate %u rx_queues"
-				     " intr_vec", hw->used_rx_queues);
+			hns3_err(hw, "failed to allocate %u rx_queues intr_vec",
+					hw->used_rx_queues);
 			ret = -ENOMEM;
 			goto alloc_intr_vec_error;
 		}
@@ -4812,28 +4835,26 @@ hns3_map_rx_interrupt(struct rte_eth_dev *dev)
 		vec = RTE_INTR_VEC_RXTX_OFFSET;
 		base = RTE_INTR_VEC_RXTX_OFFSET;
 	}
-	if (rte_intr_dp_is_en(intr_handle)) {
-		for (q_id = 0; q_id < hw->used_rx_queues; q_id++) {
-			ret = hns3_bind_ring_with_vector(hw, vec, true,
-							 HNS3_RING_TYPE_RX,
-							 q_id);
-			if (ret)
-				goto bind_vector_error;
-			intr_handle->intr_vec[q_id] = vec;
-			if (vec < base + intr_handle->nb_efd - 1)
-				vec++;
-		}
+
+	for (q_id = 0; q_id < hw->used_rx_queues; q_id++) {
+		ret = hns3_bind_ring_with_vector(hw, vec, true,
+						 HNS3_RING_TYPE_RX, q_id);
+		if (ret)
+			goto bind_vector_error;
+		intr_handle->intr_vec[q_id] = vec;
+		/*
+		 * If there are not enough efds (e.g. not enough interrupt),
+		 * remaining queues will be bond to the last interrupt.
+		 */
+		if (vec < base + intr_handle->nb_efd - 1)
+			vec++;
 	}
 	rte_intr_enable(intr_handle);
 	return 0;
 
 bind_vector_error:
-	rte_intr_efd_disable(intr_handle);
-	if (intr_handle->intr_vec) {
-		free(intr_handle->intr_vec);
-		intr_handle->intr_vec = NULL;
-	}
-	return ret;
+	rte_free(intr_handle->intr_vec);
+	intr_handle->intr_vec = NULL;
 alloc_intr_vec_error:
 	rte_intr_efd_disable(intr_handle);
 	return ret;
@@ -6148,8 +6169,6 @@ hns3_dev_init(struct rte_eth_dev *eth_dev)
 		return 0;
 	}
 
-	eth_dev->data->dev_flags |= RTE_ETH_DEV_AUTOFILL_QUEUE_XSTATS;
-
 	ret = hns3_mp_init_primary();
 	if (ret) {
 		PMD_INIT_LOG(ERR,
@@ -6245,8 +6264,11 @@ hns3_dev_uninit(struct rte_eth_dev *eth_dev)
 
 	PMD_INIT_FUNC_TRACE();
 
-	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
-		return -EPERM;
+	if (rte_eal_process_type() != RTE_PROC_PRIMARY) {
+		rte_free(eth_dev->process_private);
+		eth_dev->process_private = NULL;
+		return 0;
+	}
 
 	if (hw->adapter_state < HNS3_NIC_CLOSING)
 		hns3_dev_close(eth_dev);

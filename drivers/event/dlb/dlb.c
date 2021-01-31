@@ -31,7 +31,7 @@
 #include <rte_string_fns.h>
 
 #include <rte_eventdev.h>
-#include <rte_eventdev_pmd.h>
+#include <eventdev_pmd.h>
 
 #include "dlb_priv.h"
 #include "dlb_iface.h"
@@ -3185,7 +3185,7 @@ dlb_dequeue_wait(struct dlb_eventdev *dlb,
 		pmc.addr = monitor_addr;
 		pmc.val = expected_value;
 		pmc.mask = qe_mask.raw_qe[1];
-		pmc.data_sz = sizeof(uint64_t);
+		pmc.size = sizeof(uint64_t);
 
 		rte_power_monitor(&pmc, timeout + start_ticks);
 

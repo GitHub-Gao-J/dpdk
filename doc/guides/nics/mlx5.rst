@@ -74,6 +74,7 @@ Features
 - RX VLAN stripping.
 - TX VLAN insertion.
 - RX CRC stripping configuration.
+- TX mbuf fast free offload.
 - Promiscuous mode on PF and VF.
 - Multicast promiscuous mode on PF and VF.
 - Hardware checksum offloads.
@@ -101,6 +102,10 @@ Features
 - Matching on GTP extension header with raw encap/decap action.
 - Matching on Geneve TLV option header with raw encap/decap action.
 - RSS support in sample action.
+- E-Switch mirroring and jump.
+- E-Switch mirroring and modify.
+- 21844 flow priorities for ingress or egress flow groups greater than 0 and for any transfer
+  flow group.
 
 Limitations
 -----------
@@ -349,11 +354,29 @@ Limitations
     for some NICs (such as ConnectX-6 Dx, ConnectX-6 Lx, and BlueField-2).
     The capability bit ``scatter_fcs_w_decap_disable`` shows NIC support.
 
+- TX mbuf fast free:
+
+  - fast free offload assumes the all mbufs being sent are originated from the
+    same memory pool and there is no any extra references to the mbufs (the
+    reference counter for each mbuf is equal 1 on tx_burst call). The latter
+    means there should be no any externally attached buffers in mbufs. It is
+    an application responsibility to provide the correct mbufs if the fast
+    free offload is engaged. The mlx5 PMD implicitly produces the mbufs with
+    externally attached buffers if MPRQ option is enabled, hence, the fast
+    free offload is neither supported nor advertised if there is MPRQ enabled.
+
 - Sample flow:
 
   - Supports ``RTE_FLOW_ACTION_TYPE_SAMPLE`` action only within NIC Rx and E-Switch steering domain.
   - The E-Switch Sample flow must have the eswitch_manager VPORT destination (PF or ECPF) and no additional actions.
   - For ConnectX-5, the ``RTE_FLOW_ACTION_TYPE_SAMPLE`` is typically used as first action in the E-Switch egress flow if with header modify or encapsulation actions.
+
+- Modify Field flow:
+
+  - Supports the 'set' operation only for ``RTE_FLOW_ACTION_TYPE_MODIFY_FIELD`` action.
+  - Modification of an arbitrary place in a packet via the special ``RTE_FLOW_FIELD_START`` Field ID is not supported.
+  - Encapsulation levels are not supported, can modify outermost header fields only.
+  - Offsets must be 32-bits aligned, cannot skip past the boundary of a field.
 
 - IPv6 header item 'proto' field, indicating the next header protocol, should
   not be set as extension header.
@@ -836,7 +859,7 @@ Driver options
   +------+-----------+-----------+-------------+-------------+
   | 1    | 24 bits   | vary 0-32 | 32 bits     | yes         |
   +------+-----------+-----------+-------------+-------------+
-  | 2    | vary 0-32 | 32 bits   | 32 bits     | yes         |
+  | 2    | vary 0-24 | 32 bits   | 32 bits     | yes         |
   +------+-----------+-----------+-------------+-------------+
 
   If there is no E-Switch configuration the ``dv_xmeta_en`` parameter is
@@ -847,6 +870,15 @@ Driver options
   The Direct Verbs/Rules (engaged with ``dv_flow_en`` = 1) supports all
   of the extensive metadata features. The legacy Verbs supports FLAG and
   MARK metadata actions over NIC Rx steering domain only.
+
+  The setting MARK or META value to zero means there is no item provided and
+  receiving datapath will not report in mbufs these items are present.
+
+  For the MARK action the last 16 values in the full range are reserved for
+  internal PMD purposes (to emulate FLAG action). The valid range for the
+  MARK action values is 0-0xFFEF for the 16-bit mode and 0-xFFFFEF
+  for the 24-bit mode, the flows with the MARK action value outside
+  the specified range will be rejected.
 
 - ``dv_flow_en`` parameter [int]
 
@@ -1562,6 +1594,11 @@ Supported hardware offloads
    | GENEVE TLV option     | | OFED 5.2      | | OFED 5.2      |
    |                       | | rdma-core 34  | | rdma-core 34  |
    |                       | | ConnectX-6 Dx | | ConnectX-6 Dx |
+   +-----------------------+-----------------+-----------------+
+   | Modify Field          | | DPDK 21.02    | | DPDK 21.02    |
+   |                       | | OFED 5.2      | | OFED 5.2      |
+   |                       | | rdma-core 35  | | rdma-core 35  |
+   |                       | | ConnectX-5    | | ConnectX-5    |
    +-----------------------+-----------------+-----------------+
 
 Notes for metadata

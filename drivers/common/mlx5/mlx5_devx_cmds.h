@@ -116,6 +116,7 @@ struct mlx5_hca_attr {
 	uint32_t scatter_fcs_w_decap_disable:1;
 	uint32_t flow_hit_aso:1; /* General obj type FLOW_HIT_ASO supported. */
 	uint32_t regex:1;
+	uint32_t reg_c_preserve:1;
 	uint32_t regexp_num_of_engines;
 	uint32_t log_max_ft_sampler_num:8;
 	uint32_t geneve_tlv_opt;
@@ -130,6 +131,13 @@ struct mlx5_hca_attr {
 	uint32_t log_max_srq;
 	uint32_t log_max_srq_sz;
 	uint32_t rss_ind_tbl_cap;
+	uint32_t mmo_dma_en:1;
+	uint32_t mmo_compress_en:1;
+	uint32_t mmo_decompress_en:1;
+	uint32_t compress_min_block_size:4;
+	uint32_t log_max_mmo_dma:5;
+	uint32_t log_max_mmo_compress:5;
+	uint32_t log_max_mmo_decompress:5;
 };
 
 struct mlx5_devx_wq_attr {

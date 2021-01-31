@@ -20,7 +20,7 @@
  * - The driver-oriented Ethernet API that exports functions allowing
  *   an Ethernet Poll Mode Driver (PMD) to allocate an Ethernet device instance,
  *   create memzone for HW rings and process registered callbacks, and so on.
- *   PMDs should include rte_ethdev_driver.h instead of this header.
+ *   PMDs should include ethdev_driver.h instead of this header.
  *
  * By default, all the functions of the Ethernet Device API exported by a PMD
  * are lock-free functions which assume to not be invoked in parallel on
@@ -241,6 +241,9 @@ void rte_eth_iterator_cleanup(struct rte_dev_iterator *iter);
  * Not all statistics fields in struct rte_eth_stats are supported
  * by any type of network interface card (NIC). If any statistics
  * field is not supported, its value is 0.
+ * All byte-related statistics do not include Ethernet FCS regardless
+ * of whether these bytes have been delivered to the application
+ * (see DEV_RX_OFFLOAD_KEEP_CRC).
  */
 struct rte_eth_stats {
 	uint64_t ipackets;  /**< Total number of successfully received packets. */
@@ -527,6 +530,7 @@ struct rte_eth_rss_conf {
 #define ETH_RSS_PFCP               (1ULL << 30)
 #define ETH_RSS_PPPOE		   (1ULL << 31)
 #define ETH_RSS_ECPRI		   (1ULL << 32)
+#define ETH_RSS_MPLS		   (1ULL << 33)
 
 /*
  * We use the following macros to combine with above ETH_RSS_* for
@@ -758,7 +762,8 @@ rte_eth_rss_hf_refine(uint64_t rss_hf)
 	ETH_RSS_PORT  | \
 	ETH_RSS_VXLAN | \
 	ETH_RSS_GENEVE | \
-	ETH_RSS_NVGRE)
+	ETH_RSS_NVGRE | \
+	ETH_RSS_MPLS)
 
 /*
  * Definitions used for redirection table entry size.

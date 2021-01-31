@@ -91,9 +91,9 @@ net_addr_to_host(uint32_t *dst, const rte_be32_t *src, size_t len)
 /*
  * This function is used to find rss general action.
  * 1. As we know RSS is used to spread packets among several queues, the flow
- *    API provide the struct rte_flow_action_rss, user could config it's field
+ *    API provide the struct rte_flow_action_rss, user could config its field
  *    sush as: func/level/types/key/queue to control RSS function.
- * 2. The flow API also support queue region configuration for hns3. It was
+ * 2. The flow API also supports queue region configuration for hns3. It was
  *    implemented by FDIR + RSS in hns3 hardware, user can create one FDIR rule
  *    which action is RSS queues region.
  * 3. When action is RSS, we use the following rule to distinguish:
@@ -128,11 +128,11 @@ hns3_find_rss_general_action(const struct rte_flow_item pattern[],
 	rss = act->conf;
 	if (have_eth && rss->conf.queue_num) {
 		/*
-		 * Patter have ETH and action's queue_num > 0, indicate this is
+		 * Pattern have ETH and action's queue_num > 0, indicate this is
 		 * queue region configuration.
 		 * Because queue region is implemented by FDIR + RSS in hns3
-		 * hardware, it need enter FDIR process, so here return NULL to
-		 * avoid enter RSS process.
+		 * hardware, it needs to enter FDIR process, so here return NULL
+		 * to avoid enter RSS process.
 		 */
 		return NULL;
 	}
@@ -405,7 +405,6 @@ hns3_handle_actions(struct rte_eth_dev *dev,
 	return 0;
 }
 
-/* Parse to get the attr and action info of flow director rule. */
 static int
 hns3_check_attr(const struct rte_flow_attr *attr, struct rte_flow_error *error)
 {
@@ -433,16 +432,11 @@ hns3_check_attr(const struct rte_flow_attr *attr, struct rte_flow_error *error)
 }
 
 static int
-hns3_parse_eth(const struct rte_flow_item *item,
-		   struct hns3_fdir_rule *rule, struct rte_flow_error *error)
+hns3_parse_eth(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
+	       struct rte_flow_error *error __rte_unused)
 {
 	const struct rte_flow_item_eth *eth_spec;
 	const struct rte_flow_item_eth *eth_mask;
-
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
 
 	/* Only used to describe the protocol stack. */
 	if (item->spec == NULL && item->mask == NULL)
@@ -483,11 +477,6 @@ hns3_parse_vlan(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_vlan *vlan_spec;
 	const struct rte_flow_item_vlan *vlan_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-
 	rule->key_conf.vlan_num++;
 	if (rule->key_conf.vlan_num > VLAN_TAG_NUM_MAX)
 		return rte_flow_error_set(error, EINVAL,
@@ -525,6 +514,17 @@ hns3_parse_vlan(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	return 0;
 }
 
+static bool
+hns3_check_ipv4_mask_supported(const struct rte_flow_item_ipv4 *ipv4_mask)
+{
+	if (ipv4_mask->hdr.total_length || ipv4_mask->hdr.packet_id ||
+	    ipv4_mask->hdr.fragment_offset || ipv4_mask->hdr.time_to_live ||
+	    ipv4_mask->hdr.hdr_checksum)
+		return false;
+
+	return true;
+}
+
 static int
 hns3_parse_ipv4(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 		struct rte_flow_error *error)
@@ -532,25 +532,17 @@ hns3_parse_ipv4(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_ipv4 *ipv4_spec;
 	const struct rte_flow_item_ipv4 *ipv4_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-
 	hns3_set_bit(rule->input_set, INNER_ETH_TYPE, 1);
 	rule->key_conf.spec.ether_type = RTE_ETHER_TYPE_IPV4;
 	rule->key_conf.mask.ether_type = ETHER_TYPE_MASK;
+
 	/* Only used to describe the protocol stack. */
 	if (item->spec == NULL && item->mask == NULL)
 		return 0;
 
 	if (item->mask) {
 		ipv4_mask = item->mask;
-		if (ipv4_mask->hdr.total_length ||
-		    ipv4_mask->hdr.packet_id ||
-		    ipv4_mask->hdr.fragment_offset ||
-		    ipv4_mask->hdr.time_to_live ||
-		    ipv4_mask->hdr.hdr_checksum) {
+		if (!hns3_check_ipv4_mask_supported(ipv4_mask)) {
 			return rte_flow_error_set(error, EINVAL,
 						  RTE_FLOW_ERROR_TYPE_ITEM_MASK,
 						  item,
@@ -599,11 +591,6 @@ hns3_parse_ipv6(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_ipv6 *ipv6_spec;
 	const struct rte_flow_item_ipv6 *ipv6_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-
 	hns3_set_bit(rule->input_set, INNER_ETH_TYPE, 1);
 	rule->key_conf.spec.ether_type = RTE_ETHER_TYPE_IPV6;
 	rule->key_conf.mask.ether_type = ETHER_TYPE_MASK;
@@ -648,17 +635,24 @@ hns3_parse_ipv6(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	return 0;
 }
 
+static bool
+hns3_check_tcp_mask_supported(const struct rte_flow_item_tcp *tcp_mask)
+{
+	if (tcp_mask->hdr.sent_seq || tcp_mask->hdr.recv_ack ||
+	    tcp_mask->hdr.data_off || tcp_mask->hdr.tcp_flags ||
+	    tcp_mask->hdr.rx_win || tcp_mask->hdr.cksum ||
+	    tcp_mask->hdr.tcp_urp)
+		return false;
+
+	return true;
+}
+
 static int
 hns3_parse_tcp(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	       struct rte_flow_error *error)
 {
 	const struct rte_flow_item_tcp *tcp_spec;
 	const struct rte_flow_item_tcp *tcp_mask;
-
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
 
 	hns3_set_bit(rule->input_set, INNER_IP_PROTO, 1);
 	rule->key_conf.spec.ip_proto = IPPROTO_TCP;
@@ -670,10 +664,7 @@ hns3_parse_tcp(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 
 	if (item->mask) {
 		tcp_mask = item->mask;
-		if (tcp_mask->hdr.sent_seq || tcp_mask->hdr.recv_ack ||
-		    tcp_mask->hdr.data_off || tcp_mask->hdr.tcp_flags ||
-		    tcp_mask->hdr.rx_win || tcp_mask->hdr.cksum ||
-		    tcp_mask->hdr.tcp_urp) {
+		if (!hns3_check_tcp_mask_supported(tcp_mask)) {
 			return rte_flow_error_set(error, EINVAL,
 						  RTE_FLOW_ERROR_TYPE_ITEM_MASK,
 						  item,
@@ -706,14 +697,10 @@ hns3_parse_udp(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_udp *udp_spec;
 	const struct rte_flow_item_udp *udp_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-
 	hns3_set_bit(rule->input_set, INNER_IP_PROTO, 1);
 	rule->key_conf.spec.ip_proto = IPPROTO_UDP;
 	rule->key_conf.mask.ip_proto = IPPROTO_MASK;
+
 	/* Only used to describe the protocol stack. */
 	if (item->spec == NULL && item->mask == NULL)
 		return 0;
@@ -751,11 +738,6 @@ hns3_parse_sctp(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 {
 	const struct rte_flow_item_sctp *sctp_spec;
 	const struct rte_flow_item_sctp *sctp_mask;
-
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
 
 	hns3_set_bit(rule->input_set, INNER_IP_PROTO, 1);
 	rule->key_conf.spec.ip_proto = IPPROTO_SCTP;
@@ -800,7 +782,7 @@ hns3_parse_sctp(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 }
 
 /*
- * Check items before tunnel, save inner configs to outer configs,and clear
+ * Check items before tunnel, save inner configs to outer configs, and clear
  * inner configs.
  * The key consists of two parts: meta_data and tuple keys.
  * Meta data uses 15 bits, including vlan_num(2bit), des_port(12bit) and tunnel
@@ -888,15 +870,6 @@ hns3_parse_vxlan(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_vxlan *vxlan_spec;
 	const struct rte_flow_item_vxlan *vxlan_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-	else if (item->spec && (item->mask == NULL))
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Tunnel packets must configure with mask");
-
 	hns3_set_bit(rule->input_set, OUTER_DST_PORT, 1);
 	rule->key_conf.mask.tunnel_type = TUNNEL_TYPE_MASK;
 	if (item->type == RTE_FLOW_ITEM_TYPE_VXLAN)
@@ -938,15 +911,6 @@ hns3_parse_nvgre(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 {
 	const struct rte_flow_item_nvgre *nvgre_spec;
 	const struct rte_flow_item_nvgre *nvgre_mask;
-
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-	else if (item->spec && (item->mask == NULL))
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Tunnel packets must configure with mask");
 
 	hns3_set_bit(rule->input_set, OUTER_IP_PROTO, 1);
 	rule->key_conf.spec.outer_proto = IPPROTO_GRE;
@@ -997,15 +961,6 @@ hns3_parse_geneve(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 	const struct rte_flow_item_geneve *geneve_spec;
 	const struct rte_flow_item_geneve *geneve_mask;
 
-	if (item->spec == NULL && item->mask)
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Can't configure FDIR with mask but without spec");
-	else if (item->spec && (item->mask == NULL))
-		return rte_flow_error_set(error, EINVAL,
-					  RTE_FLOW_ERROR_TYPE_ITEM, item,
-					  "Tunnel packets must configure with mask");
-
 	hns3_set_bit(rule->input_set, OUTER_DST_PORT, 1);
 	rule->key_conf.spec.tunnel_type = HNS3_TUNNEL_TYPE_GENEVE;
 	rule->key_conf.mask.tunnel_type = TUNNEL_TYPE_MASK;
@@ -1042,6 +997,17 @@ hns3_parse_tunnel(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 {
 	int ret;
 
+	if (item->spec == NULL && item->mask)
+		return rte_flow_error_set(error, EINVAL,
+					  RTE_FLOW_ERROR_TYPE_ITEM, item,
+					  "Can't configure FDIR with mask "
+					  "but without spec");
+	else if (item->spec && (item->mask == NULL))
+		return rte_flow_error_set(error, EINVAL,
+					  RTE_FLOW_ERROR_TYPE_ITEM, item,
+					  "Tunnel packets must configure "
+					  "with mask");
+
 	switch (item->type) {
 	case RTE_FLOW_ITEM_TYPE_VXLAN:
 	case RTE_FLOW_ITEM_TYPE_VXLAN_GPE:
@@ -1069,6 +1035,12 @@ hns3_parse_normal(const struct rte_flow_item *item, struct hns3_fdir_rule *rule,
 		  struct rte_flow_error *error)
 {
 	int ret;
+
+	if (item->spec == NULL && item->mask)
+		return rte_flow_error_set(error, EINVAL,
+					  RTE_FLOW_ERROR_TYPE_ITEM, item,
+					  "Can't configure FDIR with mask "
+					  "but without spec");
 
 	switch (item->type) {
 	case RTE_FLOW_ITEM_TYPE_ETH:
@@ -1293,7 +1265,7 @@ hns3_action_rss_same(const struct rte_flow_action_rss *comp,
 	if (comp->func == RTE_ETH_HASH_FUNCTION_MAX)
 		func_is_same = false;
 	else
-		func_is_same = (with->func ? (comp->func == with->func) : true);
+		func_is_same = with->func ? (comp->func == with->func) : true;
 
 	return (func_is_same &&
 		comp->types == (with->types & HNS3_ETH_RSS_SUPPORT) &&
@@ -1326,6 +1298,28 @@ hns3_rss_conf_copy(struct hns3_rss_conf *out,
 		out->conf.key = memcpy(out->key, in->key, in->key_len);
 
 	return 0;
+}
+
+static bool
+hns3_rss_input_tuple_supported(struct hns3_hw *hw,
+			       const struct rte_flow_action_rss *rss)
+{
+	/*
+	 * For IP packet, it is not supported to use src/dst port fields to RSS
+	 * hash for the following packet types.
+	 * - IPV4 FRAG | IPV4 NONFRAG | IPV6 FRAG | IPV6 NONFRAG
+	 * Besides, for Kunpeng920, the NIC HW is not supported to use src/dst
+	 * port fields to RSS hash for IPV6 SCTP packet type. However, the
+	 * Kunpeng930 and future kunpeng series support to use src/dst port
+	 * fields to RSS hash for IPv6 SCTP packet type.
+	 */
+	if (rss->types & (ETH_RSS_L4_DST_ONLY | ETH_RSS_L4_SRC_ONLY) &&
+	    (rss->types & ETH_RSS_IP ||
+	    (!hw->rss_info.ipv6_sctp_offload_supported &&
+	    rss->types & ETH_RSS_NONFRAG_IPV6_SCTP)))
+		return false;
+
+	return true;
 }
 
 /*
@@ -1386,18 +1380,7 @@ hns3_parse_rss_filter(struct rte_eth_dev *dev,
 					  RTE_FLOW_ERROR_TYPE_ACTION_CONF, act,
 					  "RSS hash key must be exactly 40 bytes");
 
-	/*
-	 * For Kunpeng920 and Kunpeng930 NIC hardware, it is not supported to
-	 * use dst port/src port fields to RSS hash for the following packet
-	 * types.
-	 * - IPV4 FRAG | IPV4 NONFRAG | IPV6 FRAG | IPV6 NONFRAG
-	 * Besides, for Kunpeng920, The NIC hardware is not supported to use
-	 * src/dst port fields to RSS hash for IPV6 SCTP packet type.
-	 */
-	if (rss->types & (ETH_RSS_L4_DST_ONLY | ETH_RSS_L4_SRC_ONLY) &&
-	   (rss->types & ETH_RSS_IP ||
-	   (!hw->rss_info.ipv6_sctp_offload_supported &&
-	   rss->types & ETH_RSS_NONFRAG_IPV6_SCTP)))
+	if (!hns3_rss_input_tuple_supported(hw, rss))
 		return rte_flow_error_set(error, EINVAL,
 					  RTE_FLOW_ERROR_TYPE_ACTION_CONF,
 					  &rss->types,
@@ -1464,7 +1447,7 @@ hns3_parse_rss_algorithm(struct hns3_hw *hw, enum rte_eth_hash_function *func,
 		*hash_algo = HNS3_RSS_HASH_ALGO_SYMMETRIC_TOEP;
 		break;
 	default:
-		hns3_err(hw, "Invalid RSS algorithm configuration(%u)",
+		hns3_err(hw, "Invalid RSS algorithm configuration(%d)",
 			 algo_func);
 		return -EINVAL;
 	}
@@ -1486,14 +1469,12 @@ hns3_hw_rss_hash_set(struct hns3_hw *hw, struct rte_flow_action_rss *rss_config)
 	if (ret)
 		return ret;
 
-	ret = hns3_set_rss_algo_key(hw, rss_config->key);
+	ret = hns3_rss_set_algo_key(hw, rss_config->key);
 	if (ret)
 		return ret;
 
-	/* Update algorithm of hw */
 	hw->rss_info.conf.func = rss_config->func;
 
-	/* Set flow type supported */
 	tuple = &hw->rss_info.rss_tuple_sets;
 	ret = hns3_set_rss_tuple_by_rss_hf(hw, tuple, rss_config->types);
 	if (ret)
@@ -1578,7 +1559,7 @@ hns3_config_rss_filter(struct rte_eth_dev *dev,
 		if (rss_flow_conf.queue_num) {
 			/*
 			 * Due the content of queue pointer have been reset to
-			 * 0, the rss_info->conf.queue should be set NULL
+			 * 0, the rss_info->conf.queue should be set to NULL
 			 */
 			rss_info->conf.queue = NULL;
 			rss_info->conf.queue_num = 0;
@@ -1744,7 +1725,7 @@ hns3_flow_validate(struct rte_eth_dev *dev, const struct rte_flow_attr *attr,
 /*
  * Create or destroy a flow rule.
  * Theorically one rule can match more than one filters.
- * We will let it use the filter which it hitt first.
+ * We will let it use the filter which it hit first.
  * So, the sequence matters.
  */
 static struct rte_flow *
@@ -1881,6 +1862,7 @@ hns3_flow_destroy(struct rte_eth_dev *dev, struct rte_flow *flow,
 		return rte_flow_error_set(error, EINVAL,
 					  RTE_FLOW_ERROR_TYPE_HANDLE,
 					  flow, "Flow is NULL");
+
 	filter_type = flow->filter_type;
 	switch (filter_type) {
 	case RTE_ETH_FILTER_FDIR:

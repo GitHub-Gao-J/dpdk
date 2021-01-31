@@ -16,8 +16,8 @@
 #include <fcntl.h>
 
 #include <rte_malloc.h>
-#include <rte_ethdev_driver.h>
-#include <rte_ethdev_pci.h>
+#include <ethdev_driver.h>
+#include <ethdev_pci.h>
 #include <rte_pci.h>
 #include <rte_bus_pci.h>
 #include <rte_common.h>
@@ -930,8 +930,6 @@ err_secondary:
 	priv->dev_port = spawn->phys_port;
 	priv->pci_dev = spawn->pci_dev;
 	priv->mtu = RTE_ETHER_MTU;
-	priv->mp_id.port_id = port_id;
-	strlcpy(priv->mp_id.name, MLX5_MP_NAME, RTE_MP_MAX_NAME_LEN);
 	/* Some internal functions rely on Netlink sockets, open them now. */
 	priv->nl_socket_rdma = mlx5_nl_init(NETLINK_RDMA);
 	priv->nl_socket_route =	mlx5_nl_init(NETLINK_ROUTE);
@@ -1347,6 +1345,8 @@ err_secondary:
 		eth_dev->data->dev_flags |= RTE_ETH_DEV_REPRESENTOR;
 		eth_dev->data->representor_id = priv->representor_id;
 	}
+	priv->mp_id.port_id = eth_dev->data->port_id;
+	strlcpy(priv->mp_id.name, MLX5_MP_NAME, RTE_MP_MAX_NAME_LEN);
 	/*
 	 * Store associated network device interface index. This index
 	 * is permanent throughout the lifetime of device. So, we may store

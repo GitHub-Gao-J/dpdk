@@ -788,7 +788,7 @@ static void cmd_help_long_parsed(void *parsed_result,
 			"receive buffers available.\n\n"
 
 			"port config all rss (all|default|ip|tcp|udp|sctp|"
-			"ether|port|vxlan|geneve|nvgre|vxlan-gpe|ecpri|none|level-default|"
+			"ether|port|vxlan|geneve|nvgre|vxlan-gpe|ecpri|mpls|none|level-default|"
 			"level-outer|level-inner|<flowtype_id>)\n"
 			"    Set the RSS mode.\n\n"
 
@@ -1877,7 +1877,9 @@ cmd_config_max_pkt_len_parsed(void *parsed_result,
 				__rte_unused void *data)
 {
 	struct cmd_config_max_pkt_len_result *res = parsed_result;
+	uint32_t max_rx_pkt_len_backup = 0;
 	portid_t pid;
+	int ret;
 
 	if (!all_ports_stopped()) {
 		printf("Please stop all ports first\n");
@@ -1896,7 +1898,18 @@ cmd_config_max_pkt_len_parsed(void *parsed_result,
 			if (res->value == port->dev_conf.rxmode.max_rx_pkt_len)
 				return;
 
+			ret = eth_dev_info_get_print_err(pid, &port->dev_info);
+			if (ret != 0) {
+				printf("rte_eth_dev_info_get() failed for port %u\n",
+					pid);
+				return;
+			}
+
+			max_rx_pkt_len_backup = port->dev_conf.rxmode.max_rx_pkt_len;
+
 			port->dev_conf.rxmode.max_rx_pkt_len = res->value;
+			if (update_jumbo_frame_offload(pid) != 0)
+				port->dev_conf.rxmode.max_rx_pkt_len = max_rx_pkt_len_backup;
 		} else {
 			printf("Unknown parameter\n");
 			return;
@@ -2220,6 +2233,8 @@ cmd_config_rss_parsed(void *parsed_result,
 		rss_conf.rss_hf = ETH_RSS_GTPU;
 	else if (!strcmp(res->value, "ecpri"))
 		rss_conf.rss_hf = ETH_RSS_ECPRI;
+	else if (!strcmp(res->value, "mpls"))
+		rss_conf.rss_hf = ETH_RSS_MPLS;
 	else if (!strcmp(res->value, "none"))
 		rss_conf.rss_hf = 0;
 	else if (!strcmp(res->value, "level-default")) {
@@ -2290,7 +2305,7 @@ cmdline_parse_inst_t cmd_config_rss = {
 	.data = NULL,
 	.help_str = "port config all rss "
 		"all|default|eth|vlan|ip|tcp|udp|sctp|ether|port|vxlan|geneve|"
-		"nvgre|vxlan-gpe|l2tpv3|esp|ah|pfcp|ecpri|none|level-default|"
+		"nvgre|vxlan-gpe|l2tpv3|esp|ah|pfcp|ecpri|mpls|none|level-default|"
 		"level-outer|level-inner|<flowtype_id>",
 	.tokens = {
 		(void *)&cmd_config_rss_port,
@@ -3776,6 +3791,7 @@ cmd_set_rxoffs_parsed(void *parsed_result,
 				  MAX_SEGS_BUFFER_SPLIT, seg_offsets, 0);
 	if (nb_segs > 0)
 		set_rx_pkt_offsets(seg_offsets, nb_segs);
+	cmd_reconfig_device_queue(RTE_PORT_ALL, 0, 1);
 }
 
 cmdline_parse_token_string_t cmd_set_rxoffs_keyword =
@@ -3822,6 +3838,7 @@ cmd_set_rxpkts_parsed(void *parsed_result,
 				  MAX_SEGS_BUFFER_SPLIT, seg_lengths, 0);
 	if (nb_segs > 0)
 		set_rx_pkt_segments(seg_lengths, nb_segs);
+	cmd_reconfig_device_queue(RTE_PORT_ALL, 0, 1);
 }
 
 cmdline_parse_token_string_t cmd_set_rxpkts_keyword =
@@ -17116,6 +17133,7 @@ cmdline_read_from_file(const char *filename)
 void
 prompt(void)
 {
+	int ret;
 	/* initialize non-constant commands */
 	cmd_set_fwd_mode_init();
 	cmd_set_fwd_retry_mode_init();
@@ -17123,15 +17141,23 @@ prompt(void)
 	testpmd_cl = cmdline_stdin_new(main_ctx, "testpmd> ");
 	if (testpmd_cl == NULL)
 		return;
+
+	ret = atexit(prompt_exit);
+	if (ret != 0)
+		printf("Cannot set exit function for cmdline\n");
+
 	cmdline_interact(testpmd_cl);
-	cmdline_stdin_exit(testpmd_cl);
+	if (ret != 0)
+		cmdline_stdin_exit(testpmd_cl);
 }
 
 void
 prompt_exit(void)
 {
-	if (testpmd_cl != NULL)
+	if (testpmd_cl != NULL) {
 		cmdline_quit(testpmd_cl);
+		cmdline_stdin_exit(testpmd_cl);
+	}
 }
 
 static void
